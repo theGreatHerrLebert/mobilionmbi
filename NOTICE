@@ -1,0 +1,22 @@
+mobilionmbi
+Copyright 2026 David Teschner
+
+This is an independent reader for the MBI file format. It does not use, link to,
+embed, or redistribute the MOBILion MBI SDK or any part of it.
+
+Provenance of the format description:
+
+- The container layout (HDF5 group and dataset structure, the run-length encoding
+  of the sparse frame planes) was determined by inspecting public data files
+  released under CC0 1.0 Universal — MassIVE MSV000099577 / PXD069856 — with
+  standard HDF5 tooling. No vendor software was involved in that inspection.
+
+- The mass-calibration parameters (`slope`, `intercept`, `mz_residual_terms`) are
+  stored as plain JSON in the data files themselves, and the form of the
+  calibration is described in the vendor's own publicly distributed C++ header
+  files (MBICalibration.h), which document the traditional TOF fit and the
+  polynomial residual correction.
+
+The MBI file format and the MBI SDK are the property of MOBILion Systems, Inc.
+This project is not affiliated with, endorsed by, or supported by MOBILion
+Systems, Inc.

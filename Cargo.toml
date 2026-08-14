@@ -1,0 +1,32 @@
+[package]
+name = "mobilionmbi"
+version = "0.1.0"
+edition = "2021"
+authors = ["David Teschner <davidteschner@googlemail.com>"]
+description = "Pure-Rust reader for MOBILion .mbi ion mobility - mass spectrometry files — no vendor SDK"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/theGreatHerrLebert/mobilionmbi"
+documentation = "https://docs.rs/mobilionmbi"
+readme = "README.md"
+keywords = ["mass-spectrometry", "proteomics", "ion-mobility", "mobilion", "hdf5"]
+categories = ["science", "parser-implementations"]
+rust-version = "1.84"
+
+[[bin]]
+name = "mbidump"
+path = "src/main.rs"
+
+[lib]
+name = "mobilionmbi"
+path = "src/lib.rs"
+
+[dependencies]
+hdf5-metno = "0.14.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+
+[workspace]
+# The PyO3 layer (mobilionmbi-connector) joins here once it lands; default-members
+# will stay ["."] so `cargo test` doesn't pull in the extension-module crate.
+members = []
