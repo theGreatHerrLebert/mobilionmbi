@@ -1,7 +1,8 @@
 # mobilionmbi
 
-A **pure-Rust** reader for **MOBILion `.mbi`** ion mobility - mass spectrometry files —
-no vendor SDK, no proprietary shared library, no C++ ABI. Cross-platform.
+A **pure-Rust** reader *and writer* for **MOBILion `.mbi`** ion mobility - mass
+spectrometry files — no vendor SDK, no proprietary shared library, no C++ ABI.
+Cross-platform.
 
 ## Why
 
@@ -22,7 +23,10 @@ necessary. This crate reads it natively.
   (1-2 ULP; 71% of values bitwise identical across all 232,992 TOF bins).
 - ✅ `MzToIndex` inverse, matching the SDK's truncation convention.
 - ✅ Global + per-frame metadata.
-- 🚧 PyO3 bindings (`mobilionmbi-connector`).
+- ✅ **Writer.** Round-trips a real 829-frame file byte-faithfully, and MOBILion's own
+  SDK reads both the round-tripped file and one synthesised from scratch.
+- ✅ PyO3 bindings (`mobilionmbi-connector`), numpy-backed — and *faster* than driving
+  the vendor SDK from Python (6.56 vs 8.66 ms/frame), since nothing is marshalled.
 - 🚧 CCS calibration — the test files carry none (`cal-dt-*` empty), so it is unwritten
   and untested rather than assumed.
 - 🚧 Multiplexed acquisitions (`frm-mux-gate` / `frm-mux-sequence`) — not yet exercised.
@@ -49,7 +53,25 @@ CLI:
 ```
 cargo run --release --bin mbidump -- run.mbi 600
 cargo run --release --example sweep -- run.mbi
+cargo run --release --example roundtrip -- in.mbi out.mbi
+cargo run --release --example synthesize -- out.mbi
 ```
+
+### Writing
+
+```rust
+use mobilionmbi::{Frame, FrameExtras, MbiWriter};
+
+let mut w = MbiWriter::create("out.mbi")?;
+w.write_global_metadata(&global)?;          // acq-num-frames is fixed up on finish()
+w.write_frame(&frame, &FrameExtras { trigger_timestamps, metadata })?;
+w.finish()?;
+# Ok::<(), mobilionmbi::Error>(())
+```
+
+A file the vendor SDK accepts needs surprisingly little metadata: 8 global keys
+(`adc-record-size`, `adc-sample-rate`, `acq-num-frames`, ...) and 5 per frame
+(`cal-ms-traditional`, `frm-num-bin-dt`, ...). See `examples/synthesize.rs`.
 
 ## Format notes (the bits that were not obvious)
 
@@ -78,6 +100,10 @@ cargo run --release --example sweep -- run.mbi
   `cal-ms-traditional` attribute (JSON). **Dropping the residual term costs up to 3.9 ppm**
   (median 0.65 ppm) — invisible in a smoke test, fatal in proteomics. The residual is
   evaluated in *microseconds* and expressed in *ppm*; neither is stated anywhere.
+
+- **Runs never span drift scans.** A writer must cut a run at the scan boundary even
+  when the TOF indices would continue, because `index-positions` addresses runs and its
+  per-scan offsets have to land on run boundaries.
 
 - **`MzToIndex` truncates**, returning the largest bin whose m/z does not exceed the
   input — it does not round.

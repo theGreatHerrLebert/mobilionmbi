@@ -26,7 +26,9 @@ use std::path::Path;
 use hdf5_metno as hdf5;
 
 pub mod calibration;
+pub mod writer;
 pub use calibration::TofCalibration;
+pub use writer::{FrameExtras, MbiWriter};
 
 /// Errors produced while reading a `.mbi` file.
 #[derive(Debug, thiserror::Error)]
@@ -43,7 +45,7 @@ pub enum Error {
     Inconsistent { index: usize, detail: String },
 }
 
-type Result<T> = std::result::Result<T, Error>;
+pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 /// One frame: a sparse `drift scan x TOF index` plane, in CSR layout.
 #[derive(Debug, Clone)]
@@ -205,6 +207,28 @@ impl MbiFile {
             .unwrap_or(0);
 
         Ok(Frame { index, data, indices, indptr, n_rows, n_cols })
+    }
+
+    /// Per-drift-scan trigger timestamps for a frame.
+    pub fn frame_trigger_timestamps(&self, index: usize) -> Result<Vec<f64>> {
+        self.check_index(index)?;
+        let g = self.file.group(&format!("data-cubes/frame-{index}-data"))?;
+        Ok(g.dataset("trigger-timestamps")?.read_raw()?)
+    }
+
+    /// Per-drift-scan total intensity for a frame, as stored.
+    ///
+    /// Derivable from the frame data, but read it back when checking a file
+    /// rather than recomputing what you are trying to verify.
+    pub fn frame_at_tic(&self, index: usize) -> Result<Vec<i64>> {
+        self.check_index(index)?;
+        let g = self.file.group(&format!("data-cubes/frame-{index}-data"))?;
+        Ok(g.dataset("at-tic")?.read_raw()?)
+    }
+
+    /// The per-frame TIC series stored at the file root.
+    pub fn rt_tic(&self) -> Result<Vec<i64>> {
+        Ok(self.file.dataset("rt-tic")?.read_raw()?)
     }
 
     /// Retention time of each frame, in the file's own units.
