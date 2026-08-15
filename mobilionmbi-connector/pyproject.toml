@@ -1,0 +1,17 @@
+[build-system]
+requires = ["maturin>=1.2,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "mobilionmbi-connector"
+# Maturin reads the version from mobilionmbi-connector/Cargo.toml so the crate stays the
+# single source of truth. Declared dynamic because otherwise the [project] table is not
+# PEP 621-valid and the build backend refuses it.
+dynamic = ["version"]
+description = "Python bindings for mobilionmbi — read MOBILion .mbi files without the vendor SDK"
+requires-python = ">=3.11"
+license = { text = "MIT OR Apache-2.0" }
+classifiers = ["Programming Language :: Rust", "Programming Language :: Python :: 3"]
+
+[tool.maturin]
+module-name = "mobilionmbi_connector"

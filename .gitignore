@@ -1,3 +1,4 @@
 /target
 Cargo.lock
 *.mbi
+/mobilionmbi-connector/target

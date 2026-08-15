@@ -27,6 +27,7 @@ serde_json = "1.0.151"
 thiserror = "2.0.20"
 
 [workspace]
-# The PyO3 layer (mobilionmbi-connector) joins here once it lands; default-members
-# will stay ["."] so `cargo test` doesn't pull in the extension-module crate.
-members = []
+members = ["mobilionmbi-connector"]
+# Default to the core crate so `cargo test` / `cargo build` don't pull in the Python
+# extension-module crate; build that explicitly via maturin.
+default-members = ["."]

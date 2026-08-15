@@ -1,0 +1,17 @@
+[package]
+name = "mobilionmbi-connector"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.84"
+license = "MIT OR Apache-2.0"
+description = "Python (PyO3) bindings for mobilionmbi — MOBILion .mbi reading without the vendor SDK"
+repository = "https://github.com/theGreatHerrLebert/mobilionmbi"
+
+[lib]
+name = "mobilionmbi_connector"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.29.0", features = ["extension-module"] }
+numpy = "0.29.0"
+mobilionmbi = { path = "..", version = "0.1.0" }
