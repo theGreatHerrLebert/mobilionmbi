@@ -13,7 +13,7 @@ use pyo3::exceptions::{PyIndexError, PyIOError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use mobilionmbi::{Error as MbiError, Frame, MbiFile, TofCalibration};
+use mobilionmbi::{CcsCalibration, DriftAxis, Error as MbiError, Frame, MbiFile, TofCalibration};
 
 fn to_pyerr(e: MbiError) -> PyErr {
     match e {
@@ -88,6 +88,138 @@ impl PyCalibration {
             self.inner.slope,
             self.inner.intercept,
             self.inner.residual_terms.len()
+        )
+    }
+}
+
+/// The evenly spaced drift-scan arrival times of a frame.
+#[pyclass(name = "DriftAxis")]
+#[derive(Clone)]
+pub struct PyDriftAxis {
+    inner: DriftAxis,
+}
+
+#[pymethods]
+impl PyDriftAxis {
+    #[getter]
+    fn period_ms(&self) -> f64 {
+        self.inner.period_ms
+    }
+    #[getter]
+    fn n_scans(&self) -> usize {
+        self.inner.n_scans
+    }
+
+    /// Arrival time of one scan, in milliseconds.
+    fn arrival_time_ms(&self, scan: usize) -> f64 {
+        self.inner.arrival_time_ms(scan)
+    }
+
+    /// Arrival times of every scan, as a numpy array.
+    fn arrival_times_ms<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.inner.arrival_times_ms().into_pyarray(py)
+    }
+
+    /// The scan nearest a given arrival time.
+    fn scan_at(&self, t_ms: f64) -> usize {
+        self.inner.scan_at(t_ms)
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.n_scans
+    }
+    fn __repr__(&self) -> String {
+        format!(
+            "DriftAxis({} scans, {:.6} ms apart)",
+            self.inner.n_scans, self.inner.period_ms
+        )
+    }
+}
+
+/// A collision cross section calibration.
+#[pyclass(name = "CcsCalibration")]
+#[derive(Clone)]
+pub struct PyCcsCalibration {
+    inner: CcsCalibration,
+}
+
+#[pymethods]
+impl PyCcsCalibration {
+    /// Coefficients in **lowest-order-first** order, already un-reversed and, for
+    /// legacy calibrations, already rescaled — i.e. not the raw JSON order.
+    #[getter]
+    fn coefficients(&self) -> Vec<f64> {
+        self.inner.coefficients.clone()
+    }
+    #[getter]
+    fn gas_mass(&self) -> f64 {
+        self.inner.gas_mass
+    }
+    #[getter]
+    fn gas_type(&self) -> Option<String> {
+        self.inner.gas_type.clone()
+    }
+    #[getter]
+    fn at_surfing(&self) -> f64 {
+        self.inner.at_surfing
+    }
+    #[getter]
+    fn version(&self) -> Option<String> {
+        self.inner.version.clone()
+    }
+    #[getter]
+    fn degree(&self) -> usize {
+        self.inner.degree()
+    }
+    #[getter]
+    fn calibrated_range(&self) -> (f64, f64) {
+        self.inner.calibrated_range()
+    }
+
+    /// Arrival times (ms) -> CCS in square angstroms, vectorised.
+    #[pyo3(signature = (at_ms, mz, z=1))]
+    fn arrival_time_to_ccs<'py>(
+        &self,
+        py: Python<'py>,
+        at_ms: PyReadonlyArray1<'py, f64>,
+        mz: PyReadonlyArray1<'py, f64>,
+        z: i32,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let (at, mz) = (at_ms.as_slice()?, mz.as_slice()?);
+        if at.len() != mz.len() {
+            return Err(PyValueError::new_err(format!(
+                "at_ms and mz must be the same length ({} vs {})",
+                at.len(),
+                mz.len()
+            )));
+        }
+        let out: Vec<f64> = py.detach(|| {
+            at.iter()
+                .zip(mz)
+                .map(|(&t, &m)| self.inner.arrival_time_to_ccs(t, m, z))
+                .collect()
+        });
+        Ok(out.into_pyarray(py))
+    }
+
+    /// CCS -> arrival time in milliseconds. None where the model is not invertible.
+    #[pyo3(signature = (ccs, mz, z=1))]
+    fn ccs_to_arrival_time(&self, ccs: f64, mz: f64, z: i32) -> Option<f64> {
+        self.inner.ccs_to_arrival_time(ccs, mz, z)
+    }
+
+    /// `sqrt(mu) / z`, the factor between reduced and real CCS.
+    #[pyo3(signature = (mz, z=1))]
+    fn reduction_factor(&self, mz: f64, z: i32) -> f64 {
+        self.inner.reduction_factor(mz, z)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CcsCalibration(degree={}, gas={} Da, range={:?})",
+            self.inner.degree(),
+            self.inner.gas_mass,
+            self.inner.calibrated_range()
         )
     }
 }
@@ -269,6 +401,22 @@ impl PyMbiFile {
         })
     }
 
+    /// The file's CCS calibration, or None when the acquisition carried none.
+    fn ccs_calibration(&self) -> PyResult<Option<PyCcsCalibration>> {
+        Ok(self
+            .inner
+            .ccs_calibration()
+            .map_err(to_pyerr)?
+            .map(|inner| PyCcsCalibration { inner }))
+    }
+
+    /// The drift axis of a frame.
+    fn drift_axis(&self, index: usize) -> PyResult<PyDriftAxis> {
+        Ok(PyDriftAxis {
+            inner: self.inner.drift_axis(index).map_err(to_pyerr)?,
+        })
+    }
+
     /// Read one frame. Frame indices are **1-based**, as in the vendor API.
     fn frame(&self, py: Python<'_>, index: usize) -> PyResult<PyFrame> {
         let f = py.detach(|| self.inner.frame(index)).map_err(to_pyerr)?;
@@ -293,6 +441,8 @@ fn mobilionmbi_connector(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMbiFile>()?;
     m.add_class::<PyFrame>()?;
     m.add_class::<PyCalibration>()?;
+    m.add_class::<PyCcsCalibration>()?;
+    m.add_class::<PyDriftAxis>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

@@ -26,8 +26,10 @@ use std::path::Path;
 use hdf5_metno as hdf5;
 
 pub mod calibration;
+pub mod ccs;
 pub mod writer;
 pub use calibration::TofCalibration;
+pub use ccs::{CcsCalibration, DriftAxis};
 pub use writer::{FrameExtras, MbiWriter};
 
 /// Errors produced while reading a `.mbi` file.
@@ -207,6 +209,38 @@ impl MbiFile {
             .unwrap_or(0);
 
         Ok(Frame { index, data, indices, indptr, n_rows, n_cols })
+    }
+
+    /// The file's CCS calibration, from the global `cal-ccs` attribute.
+    ///
+    /// Returns `Ok(None)` when the acquisition carried no CCS calibration, which
+    /// is common — the attribute is then absent or an empty string.
+    pub fn ccs_calibration(&self) -> Result<Option<CcsCalibration>> {
+        // The vendor's own constant for the traditional variant is spelled
+        // "cal-css-traditional" (sic), so accept that too rather than miss a
+        // calibration over a typo in the format.
+        let raw = ["cal-ccs", "cal-css-traditional", "cal-ccs-traditional"]
+            .iter()
+            .filter_map(|k| self.global.get(*k))
+            .find(|s| !s.trim().is_empty());
+        match raw {
+            None => Ok(None),
+            Some(json) => Ok(Some(CcsCalibration::from_json(json)?)),
+        }
+    }
+
+    /// The drift axis of a frame: scan spacing and scan count.
+    pub fn drift_axis(&self, index: usize) -> Result<DriftAxis> {
+        let md = self.frame_metadata(index)?;
+        let period_ms = md
+            .get("frm-dt-period")
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .ok_or_else(|| Error::MissingMetadata("frm-dt-period".into()))?;
+        let n_scans = md
+            .get("frm-num-bin-dt")
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        Ok(DriftAxis { period_ms, n_scans })
     }
 
     /// Per-drift-scan trigger timestamps for a frame.

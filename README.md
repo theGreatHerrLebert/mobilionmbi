@@ -27,8 +27,11 @@ necessary. This crate reads it natively.
   SDK reads both the round-tripped file and one synthesised from scratch.
 - ✅ PyO3 bindings (`mobilionmbi-connector`), numpy-backed — and *faster* than driving
   the vendor SDK from Python (6.56 vs 8.66 ms/frame), since nothing is marshalled.
-- 🚧 CCS calibration — the test files carry none (`cal-dt-*` empty), so it is unwritten
-  and untested rather than assumed.
+- ✅ **Drift axis**: scan `s` arrives at `s * frm-dt-period` ms, confirmed against the
+  files' own per-scan trigger timestamps.
+- ✅ **CCS calibration**, matching the SDK to 1e-12 relative. Neither public test file
+  carries one, so the model was derived against the SDK directly and verified by writing
+  a calibration into a file and having the SDK read it back.
 - 🚧 Multiplexed acquisitions (`frm-mux-gate` / `frm-mux-sequence`) — not yet exercised.
 
 ## Usage
@@ -110,6 +113,33 @@ A file the vendor SDK accepts needs surprisingly little metadata: 8 global keys
 
 - **Calibration is stored per frame** but is constant within a file in practice. It does
   differ between files, so read it per frame rather than caching one globally.
+
+- **CCS is a polynomial in arrival time, reduced by mass and charge:**
+
+  ```text
+  CCS(at_ms, mz, z) = P(at_ms) * z / sqrt(mu),   mu = mz * gas_mass / (mz + gas_mass)
+  ```
+
+  Three traps, each of which silently yields plausible-but-wrong cross sections:
+
+  1. **The stored `coefficients` are highest-order first** — the reverse of the order
+     the SDK's `GetCCSCoefficients()` and its de novo constructor use (the latter is
+     even documented as "lowest-first"). The file and the API disagree.
+  2. **Legacy calibrations rescale.** With version `0.0.x`, or no version at all, the
+     stored coefficients omit a `sqrt(gas_mass)` factor that the SDK multiplies back in
+     on load. `0.9.9` and above do not.
+  3. **The reduced mass uses m/z, not the neutral mass `mz * z`.** Physically odd, but
+     matching it is the difference between agreeing and disagreeing with every CCS the
+     instrument software reports.
+
+  Also: a `version`, when present, must be `X.Y.Z` — the SDK rejects `1.0` and `1`
+  outright — and `degree` must equal `len(coefficients) - 1` or it refuses the
+  calibration. `at_surfing` is a validity bound only; it does **not** shift the
+  polynomial's argument.
+
+- **The drift axis is uniform**: scan `s` arrives at `s * frm-dt-period` ms, with scan 0
+  at zero. `frm-dt-period` equals the SDK's `Frame::GetArrivalBinWidth()` exactly, and
+  the per-scan `trigger-timestamps` (stored in seconds) confirm the spacing.
 
 - **TOF axis width** is `adc-record-size` in the global description (232992 in the test
   files), of which the SDK exposes a valid window via `GetToFOffset()` / `GetToFLength()`

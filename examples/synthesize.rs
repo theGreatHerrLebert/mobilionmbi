@@ -23,12 +23,24 @@ fn global_metadata() -> BTreeMap<String, String> {
     m.insert("acq-ms-level".into(), "1".into());
     m.insert("acq-ms-model".into(), "synthetic".into());
     m.insert("acq-timestamp".into(), "2026-01-01 00:00:00.000000+00:00".into());
+    // A CCS calibration, so the drift axis maps to cross sections. Real
+    // acquisitions often omit this; both our reader and the vendor SDK treat it
+    // as optional.
+    m.insert("cal-ccs".into(), CCS_CAL_JSON.into());
     m
 }
+
+/// Polynomial in arrival time (ms), lowest-order first, plus the drift gas.
+const CCS_CAL_JSON: &str = r#"{"coefficients": [12.5, 3.75], "min": 100.0, "max": 900.0,
+ "degree": 1, "at_surfing": 0.5, "ccaps": 0, "Mass Flow.gas type": "N2",
+ "gas mass": 28.0134, "version": "1.0.0"}"#;
+// NB: the version must be X.Y.Z — the SDK rejects "1.0" and "1" outright, and
+// treats 0.0.x (or a missing version) as the legacy coefficient scaling.
 
 fn frame_metadata(index: usize, cal_json: &str) -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
     m.insert("frm-metadata-id".into(), index.to_string());
+    m.insert("frm-dt-period".into(), "0.11958356190006342".into());
     m.insert("frm-num-bin-dt".into(), N_SCANS.to_string());
     m.insert("frm-start-time".into(), format!("{:.6}", index as f64 * 0.5));
     m.insert("frm-polarity".into(), "positive".into());
@@ -99,6 +111,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             fr.total_intensity(),
             c.index_to_mz(cols[0]),
             vals[0]
+        );
+    }
+    // Drift axis and CCS, now that the file carries a calibration.
+    let axis = f.drift_axis(1)?;
+    let ccs = f.ccs_calibration()?.expect("we just wrote one");
+    println!(
+        "drift axis: {} scans, {:.6} ms apart; ccs degree {}, gas {} Da",
+        axis.n_scans,
+        axis.period_ms,
+        ccs.degree(),
+        ccs.gas_mass
+    );
+    for scan in [12u64, 40] {
+        let at = axis.arrival_time_ms(scan as usize);
+        println!(
+            "  scan {scan:3}: arrival {at:8.4} ms -> CCS {:9.4} A^2 (m/z 622, z=1)",
+            ccs.arrival_time_to_ccs(at, 622.0, 1)
         );
     }
     println!("size: {:.1} kB", std::fs::metadata(&out)?.len() as f64 / 1e3);

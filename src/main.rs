@@ -66,15 +66,45 @@ fn main() -> ExitCode {
         cal.residual_terms.len()
     );
 
-    let (rows, cols, vals) = frame.to_coo();
-    println!("  first 5 points  : (scan, tof, m/z, intensity)");
-    for i in 0..rows.len().min(5) {
+    let axis = file.drift_axis(idx).ok();
+    if let Some(a) = axis {
         println!(
-            "    {:5} {:8} {:12.4} {:8}",
+            "  drift axis      : {} scans, {:.6} ms apart, 0..{:.3} ms",
+            a.n_scans,
+            a.period_ms,
+            a.arrival_time_ms(a.n_scans.saturating_sub(1))
+        );
+    }
+    match file.ccs_calibration() {
+        Ok(Some(c)) => println!(
+            "  ccs calibration : degree {}, range {:.1}..{:.1} A^2, gas {:.4} Da",
+            c.degree(),
+            c.min_ccs,
+            c.max_ccs,
+            c.gas_mass
+        ),
+        Ok(None) => println!("  ccs calibration : none in this file"),
+        Err(e) => println!("  ccs calibration : unreadable ({e})"),
+    }
+
+    let ccs = file.ccs_calibration().ok().flatten();
+    let (rows, cols, vals) = frame.to_coo();
+    println!("  first 5 points  : (scan, tof, arrival ms, m/z, intensity, ccs)");
+    for i in 0..rows.len().min(5) {
+        let mz = cal.index_to_mz(cols[i]);
+        let at = axis.map(|a| a.arrival_time_ms(rows[i] as usize));
+        let ccs_val = match (&ccs, at) {
+            (Some(c), Some(t)) => format!("{:9.2}", c.arrival_time_to_ccs(t, mz, 1)),
+            _ => "        -".to_string(),
+        };
+        println!(
+            "    {:5} {:8} {:11.4} {:12.4} {:8} {}",
             rows[i],
             cols[i],
-            cal.index_to_mz(cols[i]),
-            vals[i]
+            at.unwrap_or(f64::NAN),
+            mz,
+            vals[i],
+            ccs_val
         );
     }
     ExitCode::SUCCESS
