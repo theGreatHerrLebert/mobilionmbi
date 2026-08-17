@@ -401,6 +401,42 @@ impl PyMbiFile {
         })
     }
 
+    /// Collision energy of every frame, NaN where a frame steps CE or stores none.
+    ///
+    /// In MAF acquisitions this is the MS1/MS2 distinction: low-CE frames are
+    /// precursor frames, high-CE frames carry the fragments.
+    fn collision_energies<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let n = self.inner.n_frames();
+        let out: Vec<f64> = py.detach(|| {
+            (1..=n)
+                .map(|i| {
+                    self.inner
+                        .collision_energy(i)
+                        .ok()
+                        .flatten()
+                        .unwrap_or(f64::NAN)
+                })
+                .collect()
+        });
+        Ok(out.into_pyarray(py))
+    }
+
+    /// Collision energy of one frame, or None when it steps CE / stores none.
+    fn collision_energy(&self, index: usize) -> PyResult<Option<f64>> {
+        self.inner.collision_energy(index).map_err(to_pyerr)
+    }
+
+    /// The collision-energy setpoints of a frame as (interval_count, energy_v, interval_ms).
+    fn collision_energy_setpoints(&self, index: usize) -> PyResult<Vec<(u32, f64, f64)>> {
+        Ok(self
+            .inner
+            .collision_energy_setpoints(index)
+            .map_err(to_pyerr)?
+            .into_iter()
+            .map(|s| (s.interval_count, s.energy_v, s.interval_ms))
+            .collect())
+    }
+
     /// The file's CCS calibration, or None when the acquisition carried none.
     fn ccs_calibration(&self) -> PyResult<Option<PyCcsCalibration>> {
         Ok(self

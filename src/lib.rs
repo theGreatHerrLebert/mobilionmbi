@@ -49,6 +49,33 @@ pub enum Error {
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
+/// One collision-energy setpoint within a frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CeSetpoint {
+    /// How many intervals this setpoint covers.
+    pub interval_count: u32,
+    /// Collision energy in volts.
+    pub energy_v: f64,
+    /// Length of one interval, in milliseconds.
+    pub interval_ms: f64,
+}
+
+#[derive(serde::Deserialize)]
+struct CeJson {
+    #[serde(default)]
+    interval_ms: f64,
+    #[serde(default)]
+    setpoints: Vec<CeSetpointJson>,
+}
+
+#[derive(serde::Deserialize)]
+struct CeSetpointJson {
+    #[serde(default)]
+    interval_count: u32,
+    #[serde(default)]
+    collision_energy_v: f64,
+}
+
 /// One frame: a sparse `drift scan x TOF index` plane, in CSR layout.
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -209,6 +236,45 @@ impl MbiFile {
             .unwrap_or(0);
 
         Ok(Frame { index, data, indices, indptr, n_rows, n_cols })
+    }
+
+    /// The collision-energy setpoints of a frame, in order.
+    ///
+    /// Stored as `frm-collision-energy`, shaped for stepping CE across a frame:
+    /// `{"interval_ms": …, "setpoints": [{"interval_count": …,
+    /// "collision_energy_v": …}]}`. Every file seen so far carries exactly one
+    /// setpoint per frame, but the structure allows more, so this returns them
+    /// all rather than pretending otherwise.
+    pub fn collision_energy_setpoints(&self, index: usize) -> Result<Vec<CeSetpoint>> {
+        let md = self.frame_metadata(index)?;
+        let Some(raw) = md
+            .get("frm-collision-energy")
+            .filter(|s| !s.trim().is_empty())
+        else {
+            return Ok(Vec::new());
+        };
+        let parsed: CeJson = serde_json::from_str(raw)?;
+        Ok(parsed
+            .setpoints
+            .into_iter()
+            .map(|s| CeSetpoint {
+                interval_count: s.interval_count,
+                energy_v: s.collision_energy_v,
+                interval_ms: parsed.interval_ms,
+            })
+            .collect())
+    }
+
+    /// The frame's collision energy, when it has exactly one setpoint.
+    ///
+    /// Returns `None` for a frame that steps CE across intervals — use
+    /// [`Self::collision_energy_setpoints`] there — or that stores none.
+    pub fn collision_energy(&self, index: usize) -> Result<Option<f64>> {
+        let sp = self.collision_energy_setpoints(index)?;
+        Ok(match sp.len() {
+            1 => Some(sp[0].energy_v),
+            _ => None,
+        })
     }
 
     /// The file's CCS calibration, from the global `cal-ccs` attribute.
