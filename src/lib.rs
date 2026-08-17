@@ -309,6 +309,17 @@ impl MbiFile {
         Ok(DriftAxis { period_ms, n_scans })
     }
 
+    /// Number of non-zero points in a frame, without decoding it.
+    ///
+    /// Reads the `data-counts` dataset's shape, which HDF5 keeps in the object header,
+    /// so this costs a seek rather than a gzip pass — cheap enough to sweep a whole
+    /// run when building an index.
+    pub fn frame_nnz(&self, index: usize) -> Result<usize> {
+        self.check_index(index)?;
+        let g = self.file.group(&format!("data-cubes/frame-{index}-data"))?;
+        Ok(g.dataset("data-counts")?.shape().first().copied().unwrap_or(0))
+    }
+
     /// Per-drift-scan trigger timestamps for a frame.
     pub fn frame_trigger_timestamps(&self, index: usize) -> Result<Vec<f64>> {
         self.check_index(index)?;
