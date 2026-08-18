@@ -214,8 +214,17 @@ impl CcsCalibration {
     /// Degree 1 inverts in closed form. Higher degrees are solved numerically,
     /// since the SDK's own polynomials are not analytically invertible above
     /// cubic and it uses a root search there too.
+    /// Returns `None` for non-finite or unphysical inputs, and for a calibration
+    /// whose polynomial the solver cannot invert to a converged root.
     pub fn ccs_to_arrival_time(&self, ccs: f64, mz: f64, z: i32) -> Option<f64> {
+        if !ccs.is_finite() || !mz.is_finite() || mz <= 0.0 || z == 0 || !self.gas_mass.is_finite()
+        {
+            return None;
+        }
         let target = self.reduce_ccs(ccs, mz, z);
+        if !target.is_finite() {
+            return None;
+        }
         match self.coefficients.len() {
             0 => None,
             1 => None, // constant polynomial: no arrival time maps to a CCS
@@ -279,7 +288,16 @@ impl CcsCalibration {
             }
         }
         let _ = fhi;
-        Some(t)
+        // Only hand back a root the iteration actually converged to. Returning the
+        // last iterate regardless would report a confident wrong arrival time for a
+        // calibration this solver cannot invertturn.
+        let residual = f(t).abs();
+        let scale = target.abs().max(1.0);
+        if t.is_finite() && residual <= 1e-9 * scale {
+            Some(t)
+        } else {
+            None
+        }
     }
 
     #[inline]
@@ -365,6 +383,23 @@ mod tests {
             let back = c.ccs_to_arrival_time(ccs, mz, z).expect("invertible");
             assert!((back - at).abs() < 1e-6, "coef={coef:?}: {back} != {at}");
         }
+    }
+
+    #[test]
+    fn inverse_rejects_unphysical_input() {
+        let c = cal(&[0.0, 1.0], GAS_MASS_N2);
+        assert_eq!(c.ccs_to_arrival_time(f64::NAN, 622.0, 1), None);
+        assert_eq!(c.ccs_to_arrival_time(100.0, f64::INFINITY, 1), None);
+        assert_eq!(c.ccs_to_arrival_time(100.0, 0.0, 1), None, "m/z must be positive");
+        assert_eq!(c.ccs_to_arrival_time(100.0, 622.0, 0), None, "charge 0 is not an ion");
+    }
+
+    #[test]
+    fn inverse_reports_failure_rather_than_a_wrong_root() {
+        // A constant polynomial has no arrival time mapping to a given CCS; the
+        // solver must say so instead of returning its last iterate.
+        let c = cal(&[5.0], GAS_MASS_N2);
+        assert_eq!(c.ccs_to_arrival_time(1.0, 622.0, 1), None);
     }
 
     #[test]

@@ -34,6 +34,10 @@ straightforward. This crate is that, plus a writer, on any platform Rust targets
   a calibration into a file and having the SDK read it back.
 - 🚧 Multiplexed acquisitions (`frm-mux-gate` / `frm-mux-sequence`) — not yet exercised.
 
+Malformed input is rejected rather than trusted: run bounds, CSR row offsets and the
+i32 ranges the format stores are all validated before anything is allocated or written.
+An independent review by OpenAI Codex prompted that hardening.
+
 ## Usage
 
 ```rust

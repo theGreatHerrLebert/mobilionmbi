@@ -1,6 +1,6 @@
 [package]
 name = "mobilionmbi"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["David Teschner <davidteschner@googlemail.com>"]
 description = "Pure-Rust reader for MOBILion .mbi ion mobility - mass spectrometry files — no vendor SDK"

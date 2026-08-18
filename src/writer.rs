@@ -74,6 +74,34 @@ impl MbiWriter {
                 ),
             });
         }
+        if frame.indices.len() != frame.data.len() {
+            return Err(Error::Inconsistent {
+                index,
+                detail: format!(
+                    "{} indices for {} intensities",
+                    frame.indices.len(),
+                    frame.data.len()
+                ),
+            });
+        }
+        if frame.indptr.first() != Some(&0) {
+            return Err(Error::Inconsistent {
+                index,
+                detail: "indptr must start at 0".to_string(),
+            });
+        }
+        // A short final offset would write intensities into data-counts (and into
+        // the frame's TIC) that no run references — a file that reads back wrong.
+        if frame.indptr.last() != Some(&(frame.data.len() as u64)) {
+            return Err(Error::Inconsistent {
+                index,
+                detail: format!(
+                    "indptr ends at {:?} but there are {} intensities",
+                    frame.indptr.last(),
+                    frame.data.len()
+                ),
+            });
+        }
         if !extras.trigger_timestamps.is_empty()
             && extras.trigger_timestamps.len() != frame.n_rows
         {
@@ -98,8 +126,12 @@ impl MbiWriter {
         // without its closing entry; index-positions does the same for the runs.
         let index_counts: Vec<i32> = frame.indptr[..frame.n_rows]
             .iter()
-            .map(|&v| v as i32)
-            .collect();
+            .map(|&v| i32::try_from(v))
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|_| Error::Inconsistent {
+                index,
+                detail: "a row offset exceeds the i32 range the format stores".to_string(),
+            })?;
         write_1d_i32(&g, "index-counts", &index_counts)?;
         write_1d_i32(&g, "index-positions", &run_offsets)?;
         write_1d_i64(&g, "at-tic", &at_tic)?;
@@ -159,6 +191,29 @@ fn encode_runs(frame: &Frame) -> Result<(Vec<[i32; 2]>, Vec<i32>, Vec<i64>)> {
 
         at_tic.push(frame.data[a..b].iter().map(|&v| v as i64).sum());
 
+        // TOF indices are stored as i32 on disk, so anything above i32::MAX cannot
+        // be represented; casting would silently corrupt it. Rows must also be
+        // strictly increasing, or the runs below would misrepresent the plane.
+        for k in a..b {
+            if frame.indices[k] > i32::MAX as u64 {
+                return Err(Error::Inconsistent {
+                    index: frame.index,
+                    detail: format!(
+                        "TOF index {} exceeds the i32 range the format stores",
+                        frame.indices[k]
+                    ),
+                });
+            }
+            if k > a && frame.indices[k] <= frame.indices[k - 1] {
+                return Err(Error::Inconsistent {
+                    index: frame.index,
+                    detail: format!(
+                        "row {row} TOF indices are not strictly increasing at {k}"
+                    ),
+                });
+            }
+        }
+
         let mut i = a;
         while i < b {
             let start = frame.indices[i];
@@ -170,6 +225,12 @@ fn encode_runs(frame: &Frame) -> Result<(Vec<[i32; 2]>, Vec<i32>, Vec<i64>)> {
             }
             positions.push([start as i32, end as i32]);
             i = j;
+        }
+        if positions.len() > i32::MAX as usize {
+            return Err(Error::Inconsistent {
+                index: frame.index,
+                detail: "run count exceeds the i32 range the format stores".to_string(),
+            });
         }
     }
     Ok((positions, run_offsets, at_tic))
@@ -332,6 +393,52 @@ mod tests {
         let mut w = MbiWriter::create(&path).unwrap();
         let mut f = sample_frame();
         f.index = 2;
+        let err = w.write_frame(&f, &FrameExtras::default()).unwrap_err();
+        assert!(matches!(err, Error::Inconsistent { .. }), "got {err:?}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_indices_shorter_than_data() {
+        let path = temp_path("shortidx");
+        let mut w = MbiWriter::create(&path).unwrap();
+        let mut f = sample_frame();
+        f.indices.pop(); // would have panicked indexing indices[i] in encode_runs
+        let err = w.write_frame(&f, &FrameExtras::default()).unwrap_err();
+        assert!(matches!(err, Error::Inconsistent { .. }), "got {err:?}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_indptr_that_does_not_close_on_the_data() {
+        let path = temp_path("shortptr");
+        let mut w = MbiWriter::create(&path).unwrap();
+        let mut f = sample_frame();
+        // Trailing intensities no run would reference: they would still land in
+        // data-counts and in rt-tic, producing a file that reads back wrong.
+        *f.indptr.last_mut().unwrap() -= 1;
+        let err = w.write_frame(&f, &FrameExtras::default()).unwrap_err();
+        assert!(matches!(err, Error::Inconsistent { .. }), "got {err:?}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_tof_index_beyond_the_i32_the_format_stores() {
+        let path = temp_path("bigtof");
+        let mut w = MbiWriter::create(&path).unwrap();
+        let mut f = sample_frame();
+        f.indices[5] = i32::MAX as u64 + 1; // would have silently truncated
+        let err = w.write_frame(&f, &FrameExtras::default()).unwrap_err();
+        assert!(matches!(err, Error::Inconsistent { .. }), "got {err:?}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn rejects_non_increasing_tof_within_a_row() {
+        let path = temp_path("unsorted");
+        let mut w = MbiWriter::create(&path).unwrap();
+        let mut f = sample_frame();
+        f.indices.swap(0, 1); // descending pair inside row 0
         let err = w.write_frame(&f, &FrameExtras::default()).unwrap_err();
         assert!(matches!(err, Error::Inconsistent { .. }), "got {err:?}");
         std::fs::remove_file(&path).ok();

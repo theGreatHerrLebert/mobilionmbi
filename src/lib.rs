@@ -47,7 +47,8 @@ pub enum Error {
     Inconsistent { index: usize, detail: String },
 }
 
-pub(crate) type Result<T> = std::result::Result<T, Error>;
+/// Result alias used throughout the crate's public API.
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// One collision-energy setpoint within a frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -199,34 +200,94 @@ impl MbiFile {
             });
         }
 
-        // Expand [start, end) runs into explicit TOF indices.
-        let mut indices = Vec::with_capacity(data.len());
+        // Validate the runs BEFORE expanding them. A single malformed pair such as
+        // [0, i32::MAX) would otherwise allocate and iterate billions of entries
+        // before the length check below noticed, and negative bounds would widen
+        // into enormous u64 indices rather than being rejected.
+        let mut total: usize = 0;
         for pair in positions.chunks_exact(2) {
-            let (start, end) = (pair[0] as i64, pair[1] as i64);
+            let (start, end) = (pair[0], pair[1]);
+            if start < 0 || end < 0 {
+                return Err(Error::Inconsistent {
+                    index,
+                    detail: format!("run [{start}, {end}) has a negative bound"),
+                });
+            }
             if end < start {
                 return Err(Error::Inconsistent {
                     index,
                     detail: format!("run [{start}, {end}) is reversed"),
                 });
             }
-            indices.extend((start..end).map(|v| v as u64));
+            total = total
+                .checked_add((end - start) as usize)
+                .ok_or_else(|| Error::Inconsistent {
+                    index,
+                    detail: "run lengths overflow".to_string(),
+                })?;
+            if total > data.len() {
+                return Err(Error::Inconsistent {
+                    index,
+                    detail: format!(
+                        "runs cover more than the {} intensities present",
+                        data.len()
+                    ),
+                });
+            }
         }
-        if indices.len() != data.len() {
+        if total != data.len() {
             return Err(Error::Inconsistent {
                 index,
                 detail: format!(
-                    "runs expand to {} points but there are {} intensities",
-                    indices.len(),
+                    "runs expand to {total} points but there are {} intensities",
                     data.len()
                 ),
             });
         }
 
+        let mut indices = Vec::with_capacity(data.len());
+        for pair in positions.chunks_exact(2) {
+            indices.extend((pair[0] as u64)..(pair[1] as u64));
+        }
+
         // index-counts holds the per-scan start offset into data-counts; the CSR
-        // row pointer is that plus a closing entry.
+        // row pointer is that plus a closing entry. Offsets must be non-negative,
+        // non-decreasing and within the data, or downstream row slicing underflows.
         let n_rows = offsets.len();
         let mut indptr = Vec::with_capacity(n_rows + 1);
-        indptr.extend(offsets.iter().map(|&v| v as u64));
+        let mut prev: u64 = 0;
+        for (row, &v) in offsets.iter().enumerate() {
+            if v < 0 {
+                return Err(Error::Inconsistent {
+                    index,
+                    detail: format!("index-counts[{row}] is negative ({v})"),
+                });
+            }
+            let v = v as u64;
+            if row == 0 && v != 0 {
+                return Err(Error::Inconsistent {
+                    index,
+                    detail: format!("index-counts starts at {v}, expected 0"),
+                });
+            }
+            if v < prev {
+                return Err(Error::Inconsistent {
+                    index,
+                    detail: format!("index-counts[{row}] = {v} decreases from {prev}"),
+                });
+            }
+            if v > data.len() as u64 {
+                return Err(Error::Inconsistent {
+                    index,
+                    detail: format!(
+                        "index-counts[{row}] = {v} exceeds the {} intensities present",
+                        data.len()
+                    ),
+                });
+            }
+            indptr.push(v);
+            prev = v;
+        }
         indptr.push(data.len() as u64);
 
         let n_cols = self
