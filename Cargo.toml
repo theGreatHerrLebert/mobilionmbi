@@ -12,6 +12,11 @@ keywords = ["mass-spectrometry", "proteomics", "ion-mobility", "mobilion", "hdf5
 categories = ["science", "parser-implementations"]
 rust-version = "1.84"
 
+# docs.rs has no system libhdf5, so build the docs against the vendored static
+# build instead — otherwise the crate simply fails to document.
+[package.metadata.docs.rs]
+features = ["static"]
+
 [[bin]]
 name = "mbidump"
 path = "src/main.rs"
@@ -19,6 +24,14 @@ path = "src/main.rs"
 [lib]
 name = "mobilionmbi"
 path = "src/lib.rs"
+
+[features]
+# Build and statically link HDF5 instead of using a system libhdf5. Slower to
+# compile, but the result has no external HDF5 dependency — which is what makes
+# docs.rs build and lets a Python wheel ship without patchelf-ing a shared lib in.
+# `zlib` is not optional here: .mbi datasets are gzip-compressed, so a static HDF5
+# without it reads nothing.
+static = ["hdf5-metno/static", "hdf5-metno/zlib"]
 
 [dependencies]
 hdf5-metno = "0.14.1"

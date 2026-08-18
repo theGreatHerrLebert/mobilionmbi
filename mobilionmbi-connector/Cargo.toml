@@ -14,4 +14,6 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.29.0", features = ["extension-module"] }
 numpy = "0.29.0"
-mobilionmbi = { path = "..", version = "0.1.0" }
+# Static HDF5 for the Python extension: a wheel that dlopen's a system libhdf5 is
+# fragile, and building it in removes the patchelf/auditwheel repair step entirely.
+mobilionmbi = { path = "..", version = "0.1.0", features = ["static"] }
