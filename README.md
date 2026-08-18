@@ -159,4 +159,4 @@ cargo run --release --example sweep -- /path/to/run.mbi
 ## Licence
 
 MIT OR Apache-2.0, at your option. The MOBILion SDK is *not* used, linked, or
-redistributed by this crate — only observed, to validate the format notes above.
+redistributed by this crate.
