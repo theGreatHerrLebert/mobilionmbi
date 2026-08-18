@@ -1,9 +1,18 @@
-"""Check the PyO3 layer against the vendor SDK, via the nanobind oracle."""
+"""Smoke-test the PyO3 layer against a real file.
+
+    python test_connector.py <file.mbi>
+
+The expected values are those the vendor SDK reports for
+200S-100ngHeLa-14.19.00.mbi (MassIVE MSV000099577); they are asserted only when
+run against that file.
+"""
 import sys, time
 import numpy as np
 import mobilionmbi_connector as mbi
 
-PATH = "/scratch/timsim-demo/mbi-data/200S-100ngHeLa-14.19.00.mbi"
+if len(sys.argv) < 2:
+    sys.exit("usage: python test_connector.py <file.mbi>")
+PATH = sys.argv[1]
 
 f = mbi.MbiFile(PATH)
 print(f"{f!r}")

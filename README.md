@@ -6,14 +6,14 @@ Cross-platform.
 
 ## Why
 
-MOBILion ships an MBI SDK, but going through it costs you: a closed `libmbisdk.so`
-(x86-64 Linux/Windows only, glibc >= 2.29), a licence that permits object-code
-redistribution only, for non-commercial use, and **explicitly forbids combination with
-GPL-style code** — and Python bindings pinned to CPython 3.9 whose sparse containers are
-not even wrapped.
+MOBILion ships an MBI SDK, and it works. This crate exists for the cases it does not
+cover: the SDK is a closed `libmbisdk.so` for x86-64 Linux and Windows (glibc >= 2.29),
+its licence restricts redistribution to object code for non-commercial use, and its
+Python bindings target CPython 3.9 and leave the sparse containers unwrapped — so
+`GetFrameDataAsCSRArray()` cannot be called from Python.
 
-`.mbi` turns out to be plain HDF5 with a legible sparse layout, so none of that is
-necessary. This crate reads it natively.
+`.mbi` is plain HDF5 with a legible sparse layout, so a native reader is
+straightforward. This crate is that, plus a writer, on any platform Rust targets.
 
 ## Status
 
